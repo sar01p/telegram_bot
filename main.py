@@ -111,62 +111,61 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info("monitor_positions has not been started because a test is already running")
 
 async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:  # Check if there's a message
-        text = update.message.text or update.message.caption  # Check both text and caption
-        if text:  # Check if text or caption exists
-            if 'state' in context.user_data:
-                try:
-                    # Allow for various number formats like 100.000, 100,000, 100, or 100.0
-                    amount = float(text.replace(',', ''))
-                    logging.info(f"Received input '{text}' for state {context.user_data['state']}")
-                    if context.user_data['state'] == 'await_start_sol':
-                        test_state['start_sol'] = test_state['current_sol'] = amount
-                        context.user_data['state'] = 'await_buy_sol'
-                        await update.message.reply_text("Enter the SOL amount per buy (e.g., 1.000):")
-                    elif context.user_data['state'] == 'await_buy_sol':
-                        test_state['buy_amount'] = amount
-                        test_state['running'] = True
-                        await update.message.reply_text("Test started. Use /view to check status.")
-                        context.user_data.pop('state', None)
-                        asyncio.create_task(monitor_positions_automatic(context))
-                except ValueError:
-                    await update.message.reply_text("Please enter a valid number for SOL. Use dots for decimals, e.g., 100.000.")
-            else:
-                if "ALWAYS DYOR" in text.upper():  # Check for the phrase case-insensitively
-                    ca_match = is_solana_contract_address(text)
-                    if ca_match and ca_match not in processed_contracts:
-                        processed_contracts.add(ca_match)  # Add to processed to avoid duplicates
-                        market_cap, ticker = await fetch_dex_screener_data(ca_match)
-                        if test_state['running']:
-                            if test_state['buy_amount'] <= test_state['current_sol']:
-                                fee = test_state['buy_amount'] * 0.01
-                                actual_buy_amount = test_state['buy_amount'] - fee
-                                test_state['current_sol'] -= test_state['buy_amount']
-                                test_state['in_positions'] += actual_buy_amount
-                                test_state['positions'][ca_match] = {'buy_market_cap': market_cap, 'amount': actual_buy_amount, 'sold': 0.0, 'ticker': ticker}
-                                
-                                buy_message = f"Bought {ca_match} (Ticker: {ticker}) at Market Cap: {market_cap} with {test_state['buy_amount']:.3f} SOL (Fee: {fee:.3f} SOL)"
-                                await update.message.reply_text(buy_message)
-                                
-                                await send_to_chats(context, buy_message, ca_match)
-                                
-                                logging.info(f"Sent buy notification for Solana contract address: {ca_match}")
-                            else:
-                                await update.message.reply_text("Not enough SOL to buy this token.")
-                        else:
-                            await update.message.reply_text("Start a test with /test first to buy tokens.")
-                    elif ca_match in processed_contracts:
-                        logging.info(f"Already processed contract address: {ca_match}")
-                    else:
-                        logging.info("No valid contract address found in the message.")
-                else:
-                    # Only log if it's not a command message
-                    if not text.startswith('/'):
-                        logging.info("Message does not contain 'ALWAYS DYOR' phrase.")
-        else:
-            logging.info("Update has no text or caption.")
+    # Check if update.message exists
+    if update.message is None:
+        logging.info("Received update without message content")
+        return
+
+    text = update.message.text or update.message.caption  # Check both text and caption
+    if 'state' in context.user_data:
+        try:
+            # Allow for various number formats like 100.000, 100,000, 100, or 100.0
+            amount = float(text.replace(',', ''))
+            logging.info(f"Received input '{text}' for state {context.user_data['state']}")
+            if context.user_data['state'] == 'await_start_sol':
+                test_state['start_sol'] = test_state['current_sol'] = amount
+                context.user_data['state'] = 'await_buy_sol'
+                await update.message.reply_text("Enter the SOL amount per buy (e.g., 1.000):")
+            elif context.user_data['state'] == 'await_buy_sol':
+                test_state['buy_amount'] = amount
+                test_state['running'] = True
+                await update.message.reply_text("Test started. Use /view to check status.")
+                context.user_data.pop('state', None)
+                asyncio.create_task(monitor_positions_automatic(context))
+        except ValueError:
+            await update.message.reply_text("Please enter a valid number for SOL. Use dots for decimals, e.g., 100.000.")
     else:
-        logging.info("Update does not contain a message.")
+        if "ALWAYS DYOR" in text.upper():  # Check for the phrase case-insensitively
+            ca_match = is_solana_contract_address(text)
+            if ca_match and ca_match not in processed_contracts:
+                processed_contracts.add(ca_match)  # Add to processed to avoid duplicates
+                market_cap, ticker = await fetch_dex_screener_data(ca_match)
+                if test_state['running']:
+                    if test_state['buy_amount'] <= test_state['current_sol']:
+                        fee = test_state['buy_amount'] * 0.01
+                        actual_buy_amount = test_state['buy_amount'] - fee
+                        test_state['current_sol'] -= test_state['buy_amount']
+                        test_state['in_positions'] += actual_buy_amount
+                        test_state['positions'][ca_match] = {'buy_market_cap': market_cap, 'amount': actual_buy_amount, 'sold': 0.0, 'ticker': ticker}
+                        
+                        buy_message = f"Bought {ca_match} (Ticker: {ticker}) at Market Cap: {market_cap} with {test_state['buy_amount']:.3f} SOL (Fee: {fee:.3f} SOL)"
+                        await update.message.reply_text(buy_message)
+                        
+                        await send_to_chats(context, buy_message, ca_match)
+                        
+                        logging.info(f"Sent buy notification for Solana contract address: {ca_match}")
+                    else:
+                        await update.message.reply_text("Not enough SOL to buy this token.")
+                else:
+                    await update.message.reply_text("Start a test with /test first to buy tokens.")
+            elif ca_match in processed_contracts:
+                logging.info(f"Already processed contract address: {ca_match}")
+            else:
+                logging.info("No valid contract address found in the message.")
+        else:
+            # Only log if it's not a command message
+            if not text.startswith('/'):
+                logging.info("Message does not contain 'ALWAYS DYOR' phrase.")
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if test_state['running']:
@@ -273,12 +272,12 @@ async def monitor_positions_automatic(context: ContextTypes.DEFAULT_TYPE):
                         initial_investment = position['amount']
                         sold = position['sold']
                         
-                        if growth >= 45.0 and sold < initial_investment:  # 4500% growth, sell all
-                            sell_percentage = 1.0
-                        elif growth >= 3.0 and sold < initial_investment * 0.5:  # 300%
+                        if growth >= 3.0 and sold < initial_investment * 0.5:  # 300%
                             sell_percentage = 0.5
                         elif growth >= 5.0 and sold < initial_investment * 0.75:  # 500%
                             sell_percentage = 0.25
+                        elif growth >= 10.0 and sold < initial_investment:  # 1000%
+                            sell_percentage = 1 - (sold / initial_investment)  # Sell all remaining
                         else:
                             continue  # No sell action if conditions aren't met
 
@@ -381,12 +380,8 @@ async def check_monitor_positions_manual(update: Update, context: ContextTypes.D
     except Exception as e:
         logging.error(f"Unexpected error in check_monitor_positions_manual: {e}")
         await update.message.reply_text("An error occurred while checking positions.")
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.error(f"Exception while handling an update: {context.error}", exc_info=True)
-
 async def main():
-    application = Application.builder().token("7924341309:AAE8xd9_TNC51ybAgdNH1a6AffFto_P5EI8").build()
+    application = Application.builder().token(os.getenv("BOT_TOKEN")).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("test", test))
@@ -396,7 +391,6 @@ async def main():
     application.add_handler(CommandHandler("sell", sell))
     application.add_handler(CommandHandler("monitor_positions", check_monitor_positions_manual))
     application.add_handler(MessageHandler(filters.TEXT | filters.CAPTION & (~filters.COMMAND), handle_input))
-    application.add_error_handler(error_handler)
 
     await application.run_polling()
 
