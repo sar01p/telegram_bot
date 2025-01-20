@@ -383,7 +383,7 @@ async def check_monitor_positions_manual(update: Update, context: ContextTypes.D
         await update.message.reply_text("An error occurred while checking positions.")
 
 async def main():
-    application = Application.builder().token(os.getenv("BOT_TOKEN")).build()
+    application = Application.builder().token("7924341309:AAE8xd9_TNC51ybAgdNH1a6AffFto_P5EI8").build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("test", test))
