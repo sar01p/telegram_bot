@@ -272,17 +272,18 @@ async def monitor_positions_automatic(context: ContextTypes.DEFAULT_TYPE):
                         initial_investment = position['amount']
                         sold = position['sold']
                         
-                        if growth >= 3.0 and sold < initial_investment * 0.5:  # 300%
+                        if growth >= 3.0 and sold < initial_investment * 0.5:  # 300%+
                             sell_percentage = 0.5
-                        elif growth >= 5.0 and sold < initial_investment * 0.75:  # 500%
+                        elif growth >= 5.0 and sold < initial_investment * 0.75:  # 500%+
                             sell_percentage = 0.25
-                        elif growth >= 10.0 and sold < initial_investment:  # 1000%
+                        elif growth >= 10.0 and sold < initial_investment:  # 1000%+
                             sell_percentage = 1 - (sold / initial_investment)  # Sell all remaining
                         else:
                             continue  # No sell action if conditions aren't met
 
                         sell_amount = initial_investment * sell_percentage
-                        profit_sol = sell_amount * growth - sold * (growth - 1)  # Profit calculation adjusted for growth
+                        # Correct profit calculation:
+                        profit_sol = sell_amount * (growth - 1)  # Profit from selling this portion at the current growth rate
                         
                         test_state['current_sol'] += profit_sol
                         test_state['in_positions'] -= sell_amount
@@ -291,7 +292,7 @@ async def monitor_positions_automatic(context: ContextTypes.DEFAULT_TYPE):
                         # Send notification
                         remaining_percentage = round((1 - position['sold'] / initial_investment) * 100) if position['sold'] < initial_investment else 0
                         await send_to_chats(context, None, ca, bought_market_cap, market_cap, ticker, 
-                                            position['amount'], profit_sol, 
+                                            sell_amount, profit_sol,  # Here, sell_amount is what was sold this time
                                             remaining_percentage)
                         
                         if position['sold'] >= position['amount']:
@@ -380,6 +381,7 @@ async def check_monitor_positions_manual(update: Update, context: ContextTypes.D
     except Exception as e:
         logging.error(f"Unexpected error in check_monitor_positions_manual: {e}")
         await update.message.reply_text("An error occurred while checking positions.")
+
 async def main():
     application = Application.builder().token(os.getenv("BOT_TOKEN")).build()
 
