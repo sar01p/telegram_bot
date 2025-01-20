@@ -5,7 +5,7 @@ import nest_asyncio
 import requests
 import asyncio
 from telegram import Update
-from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters, ErrorHandler
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 # Apply nest_asyncio to allow nested event loops if needed
 nest_asyncio.apply()
@@ -273,12 +273,12 @@ async def monitor_positions_automatic(context: ContextTypes.DEFAULT_TYPE):
                         initial_investment = position['amount']
                         sold = position['sold']
                         
-                        if growth >= 3.0 and sold < initial_investment * 0.5:  # 300%
+                        if growth >= 45.0 and sold < initial_investment:  # 4500% growth, sell all
+                            sell_percentage = 1.0
+                        elif growth >= 3.0 and sold < initial_investment * 0.5:  # 300%
                             sell_percentage = 0.5
                         elif growth >= 5.0 and sold < initial_investment * 0.75:  # 500%
                             sell_percentage = 0.25
-                        elif growth >= 10.0 and sold < initial_investment:  # 1000%
-                            sell_percentage = 1 - (sold / initial_investment)  # Sell all remaining
                         else:
                             continue  # No sell action if conditions aren't met
 
