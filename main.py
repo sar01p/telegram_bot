@@ -1,12 +1,9 @@
-
-import os
-import asyncio
-import logging
-from functools import partial
-
 import re
+import os
+import logging
 import nest_asyncio
 import requests
+import asyncio
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
@@ -22,7 +19,9 @@ logging.basicConfig(
 def is_solana_contract_address(text):
     pattern = r'[1-9A-HJ-NP-Za-km-z]{43,44}'
     matches = re.findall(pattern, text)
-    return matches[0] if matches else None
+    if matches:
+        return matches[0]  # Assuming the first match is the contract address
+    return None
 
 def format_number(num):
     if num == "N/A":
@@ -35,6 +34,7 @@ def format_number(num):
     else:
         return str(num)
 
+# Fetch market cap and ticker from DEX Screener
 async def fetch_dex_screener_data(ca):
     try:
         url = f"https://api.dexscreener.io/latest/dex/tokens/{ca}"
@@ -44,7 +44,7 @@ async def fetch_dex_screener_data(ca):
         
         if 'pairs' in data and data['pairs']:
             pair = data['pairs'][0]
-            market_cap = pair.get('fdv', 'N/A')  
+            market_cap = pair.get('fdv', 'N/A')  # Fully Diluted Valuation, use 'mcap' for circulating market cap if available
             ticker = pair.get('baseToken', {}).get('symbol', 'N/A')
             logging.info(f"Market Cap for {ca}: {market_cap}")
             return format_number(market_cap), ticker
@@ -58,7 +58,10 @@ async def fetch_dex_screener_data(ca):
         logging.error(f"Unexpected error in fetch_dex_screener_data: {e}")
         return "N/A", "N/A"
 
-# Global state (Note: This won't persist between Cloud Functions calls; consider external storage)
+# Cache for processed contract addresses
+processed_contracts = set()
+
+# Global state for test
 test_state = {
     'running': False, 
     'start_sol': 0.0, 
@@ -69,14 +72,12 @@ test_state = {
     'last_buy_time': 0
 }
 
-processed_contracts = set()
-
 async def send_to_chats(context: ContextTypes.DEFAULT_TYPE, message, ca, bought_market_cap=None, selling_market_cap=None, ticker=None, invested_sol=None, profit_sol=None, remaining_percentage=None, exclude_chat=None):
     chat_id = -1002479118522  # The specific chat ID you want to send messages to
     
-    if bought_market_cap is None and selling_market_cap is None:
+    if bought_market_cap is None and selling_market_cap is None:  # Buy notification
         formatted_message = message
-    else:
+    else:  # Sell notification
         growth_percentage = ((selling_market_cap - bought_market_cap) / bought_market_cap * 100) if bought_market_cap > 0 else 0
         formatted_message = (
             f"🔄 **Position Sold** 🔄\n\n"
@@ -98,7 +99,6 @@ async def send_to_chats(context: ContextTypes.DEFAULT_TYPE, message, ca, bought_
     except Exception as e:
         logging.error(f"Failed to send message to chat {chat_id}: {e}")
 
-# Bot command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot is active!")
 
@@ -111,9 +111,10 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info("monitor_positions has not been started because a test is already running")
 
 async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text or update.message.caption
+    text = update.message.text or update.message.caption  # Check both text and caption
     if 'state' in context.user_data:
         try:
+            # Allow for various number formats like 100.000, 100,000, 100, or 100.0
             amount = float(text.replace(',', ''))
             logging.info(f"Received input '{text}' for state {context.user_data['state']}")
             if context.user_data['state'] == 'await_start_sol':
@@ -125,13 +126,14 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 test_state['running'] = True
                 await update.message.reply_text("Test started. Use /view to check status.")
                 context.user_data.pop('state', None)
+                asyncio.create_task(monitor_positions_automatic(context))
         except ValueError:
             await update.message.reply_text("Please enter a valid number for SOL. Use dots for decimals, e.g., 100.000.")
     else:
-        if "ALWAYS DYOR" in text.upper():
+        if "ALWAYS DYOR" in text.upper():  # Check for the phrase case-insensitively
             ca_match = is_solana_contract_address(text)
             if ca_match and ca_match not in processed_contracts:
-                processed_contracts.add(ca_match)
+                processed_contracts.add(ca_match)  # Add to processed to avoid duplicates
                 market_cap, ticker = await fetch_dex_screener_data(ca_match)
                 if test_state['running']:
                     if test_state['buy_amount'] <= test_state['current_sol']:
@@ -156,6 +158,7 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logging.info("No valid contract address found in the message.")
         else:
+            # Only log if it's not a command message
             if not update.message.text.startswith('/'):
                 logging.info("Message does not contain 'ALWAYS DYOR' phrase.")
 
@@ -239,7 +242,6 @@ async def pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No test is currently running to pause.")
 
 async def monitor_positions_automatic(context: ContextTypes.DEFAULT_TYPE):
-    # This function should not be in Cloud Functions directly. Use Cloud Tasks or another external scheduler
     logging.info("Starting automatic monitor_positions task")
     check_count = 0  # Counter for checks
     while test_state['running']:
@@ -373,56 +375,19 @@ async def check_monitor_positions_manual(update: Update, context: ContextTypes.D
     except Exception as e:
         logging.error(f"Unexpected error in check_monitor_positions_manual: {e}")
         await update.message.reply_text("An error occurred while checking positions.")
+async def main():
+    application = Application.builder().token("7924341309:AAE8xd9_TNC51ybAgdNH1a6AffFto_P5EI8").build()
 
-# Modify the main function for Cloud Functions
-async def process_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    handlers = [
-        CommandHandler("start", start),
-        CommandHandler("test", test),
-        CommandHandler("view", view),
-        CommandHandler("pause", pause),
-        CommandHandler("buy", buy),
-        CommandHandler("sell", sell),
-        CommandHandler("monitor_positions", check_monitor_positions_manual),
-        MessageHandler(filters.TEXT | filters.CAPTION & (~filters.COMMAND), handle_input)
-    ]
-    
-    for handler in handlers:
-        await handler.check_update(update)
-        if handler.check_update(update):
-            await handler.handle_update(update, context)
-            break
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("test", test))
+    application.add_handler(CommandHandler("view", view))
+    application.add_handler(CommandHandler("pause", pause))
+    application.add_handler(CommandHandler("buy", buy))
+    application.add_handler(CommandHandler("sell", sell))
+    application.add_handler(CommandHandler("monitor_positions", check_monitor_positions_manual))
+    application.add_handler(MessageHandler(filters.TEXT | filters.CAPTION & (~filters.COMMAND), handle_input))
 
-async def bot_handler(request):
-    try:
-        if request.method != 'POST':
-            return 'Only POST requests are accepted', 405
-
-        # Create the Application instance
-        application = Application.builder().token(os.environ.get("BOT_TOKEN")).build()
-        await application.initialize()
-        
-        # Use the bot from the application to properly initialize the Update
-        update = Update.de_json(request.get_json(), application.bot)
-        
-        context = ContextTypes.DEFAULT_TYPE(application)
-
-        await process_update(update, context)
-        
-        await application.shutdown()
-        return "ok", 200
-    except Exception as e:
-        logging.error("Exception occurred in bot_handler: %s", str(e), exc_info=True)
-        return "Error processing update", 500
-
-# Entry points for Cloud Functions
-async def webhook(request):
-    return await bot_handler(request)
-
-def main_function(request):
-    loop = asyncio.get_event_loop()
-    return loop.run_until_complete(webhook(request))
+    await application.run_polling()
 
 if __name__ == '__main__':
-    # For local testing, comment out or remove this block
-    pass
+    asyncio.run(main())
